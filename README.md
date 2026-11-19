@@ -25,7 +25,7 @@ It runs with no credentials. A local demo corpus (a Helm chart and a Kustomize a
 - **Fix ranking.** Candidate edits are applied to the model one at a time and re-scored. They are kept only when the workload drops by at least 5 points, then listed by points removed. Each one can show a patch. Hover the delta to see the before and after factors.
 - **Live shared dashboard.** Server-sent events push one snapshot to every open tab. The header shows a live dot and the viewer count. **Share** mints a read-only link. Viewers on that link cannot scan or simulate pushes.
 - **Public repository by URL.** `POST /api/scan` with a GitHub URL clones that repository read-only and adds it to the dashboard. No token.
-- **Discovery, webhooks, and polling.** With `GITHUB_TOKEN`, **Scan** discovers up to eight public non-fork repositories of `GITHUB_OWNER` that contain Kubernetes manifests. A push signed with `GITHUB_WEBHOOK_SECRET` rescans the repository when the payload owner is `GITHUB_OWNER`. Polling also needs the token, not the webhook secret. Every `POLL_INTERVAL_MS` (default 120000, and `0` turns it off) it compares the default-branch SHA of GitHub repositories already on the dashboard, whether or not a webhook is set.
+- **Discovery, webhooks, and polling.** With `GITHUB_TOKEN`, **Scan** discovers up to eight public non-fork repositories of `GITHUB_OWNER` that contain Kubernetes manifests. A push signed with `GITHUB_WEBHOOK_SECRET` rescans the repository when the payload owner is `GITHUB_OWNER`. Polling also needs the token, not the webhook secret. Every `POLL_INTERVAL_MS` (default 120000, and `0` turns it off) it compares the recorded branch SHA of GitHub repositories already on the dashboard, whether or not a webhook is set. That branch is the default branch, unless a webhook push recorded a different one.
 - **Demo mode.** Two repositories with real git history are created under `.data` on first launch. **Simulate push** toggles an emergency cluster-admin CronJob on `payments-platform` and every viewer updates.
 
 Outcomes the model scores include cluster-admin, kubelet `nodes/proxy`, pods/exec, cluster and namespace secret reads, a committed secret, privileged and host-namespace pods, a runtime socket hostPath, hostPort, hostNetwork, cross-namespace exposure, and cloud roles from IRSA, GKE workload identity, and Azure workload identity annotations. `kind: List` documents and JSON manifests are expanded. The analyzer never copies secret values into the API response.
@@ -54,7 +54,7 @@ The editable source of the figure is [`docs/images/architecture.svg`](docs/image
 | Interface | Tailwind CSS 4, Radix UI (dialog, tooltip, separator, slot), Inter |
 | Attack graph | Cytoscape 3, cytoscape-dagre, dagre. Node icons from the Lucide set |
 | Timeline chart | Apache ECharts 6 |
-| Manifests | Helm 3 and Kustomize 5 on `PATH`. The image pins Helm 3.16.4 and Kustomize 5.5.0. Manifests are parsed with the `yaml` package. git reads history |
+| Manifests | Helm 3 and Kustomize 5 on `PATH` outside Docker (install commands are under Local, without Docker). The image pins Helm 3.16.4 and Kustomize 5.5.0. Manifests are parsed with the `yaml` package. git reads history |
 | Live updates | Server-sent events, an in-memory snapshot, share tokens stored on disk |
 | GitHub | Read-only clone and the REST API for discovery, the default branch, and pull requests. HMAC-signed push webhooks |
 | Runtime | Node.js 22. Docker Compose for the local and persistent-host install. The image is a multi-stage build that installs git, Helm, and Kustomize |
@@ -77,23 +77,58 @@ Local Docker, local npm, and a persistent Linux host below are the alternative: 
 Mac, Linux, or Windows with Docker Desktop.
 
 ```bash
-git clone https://origin.cursor.com/git/ritvik-indupuri/tmp-da7d143fe8c6b9b4.git FathomK8
+git clone https://github.com/ritvikindupuri/FathomK8.git FathomK8
 cd FathomK8
 docker compose up -d
 ```
 
 Open http://127.0.0.1:3847. The container restarts unless you stop it (`docker compose stop`). Logs: `docker compose logs -f`. The `fathom-data` volume keeps demo history, clones, and share links across restarts.
 
-The image is built from the Dockerfile: Node 22, git, Helm 3.16.4, and Kustomize 5.5.0. The first `docker compose up -d` builds that image, which is the slow step, then starts `node server.js`. The server does not compile on startup.
+The image is built from the Dockerfile: Node 22, git, Helm 3.16.4, and Kustomize 5.5.0. Helm and Kustomize are inside the image, so this path does not need them on the host. The first `docker compose up -d` builds that image, which is the slow step, then starts `node server.js`. The server does not compile on startup.
 
 ### Local, without Docker
 
-Node.js 22, git, Helm 3, and Kustomize 5 on `PATH`.
+Node.js 22 and git, plus Helm 3 and Kustomize 5 on `PATH`. `./run.sh`, `npm run dev`, and `npm start` render the demo corpus with those two commands. `payments-platform` is a Helm chart. `platform-gitops` is a Kustomize overlay. If `helm` is missing, that scan fails with `spawn helm ENOENT`. If `kustomize` is missing, that scan fails with `spawn kustomize ENOENT`. The repository stays on the dashboard, the error is shown on the row, and the impact column is `–`. `./run.sh` prints a warning before it starts the dev server. The server also prints a warning on startup, including when Windows starts it with `npm run dev`.
+
+`brew install helm`, `winget install Helm.Helm`, and `choco install kubernetes-helm` install Helm 4. Fathom runs `helm template` from Helm 3, and the image pins Helm 3.16.4 and Kustomize 5.5.0. The commands below install Helm 3. Homebrew installs the current Helm 3 and Kustomize 5 formulae. The Linux, winget, and Chocolatey commands pin the same versions as the image.
+
+macOS (Homebrew). `helm@3` is keg-only, so the link step puts `helm` on `PATH`:
+
+```bash
+brew install helm@3 kustomize
+brew link --force --overwrite helm@3
+```
+
+Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash -s -- --version v3.16.4
+curl -fsSL -o /tmp/install_kustomize.sh https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh
+sudo bash /tmp/install_kustomize.sh 5.5.0 /usr/local/bin
+```
+
+The Kustomize script will not replace a binary that is already at `/usr/local/bin/kustomize`. Remove that file first if you are installing again.
+
+Windows (winget), in Command Prompt or PowerShell:
+
+```bat
+winget install --id Helm.Helm -e --version 3.16.4 --accept-package-agreements --accept-source-agreements
+winget install --id Kubernetes.kustomize -e --version 5.5.0 --accept-package-agreements --accept-source-agreements
+```
+
+Windows (Chocolatey):
+
+```bat
+choco install kubernetes-helm --version=3.16.4 -y
+choco install kustomize --version=5.5.0 -y
+```
+
+Open a new terminal after installing so `helm` and `kustomize` are on `PATH`.
 
 Mac or Linux:
 
 ```bash
-git clone https://origin.cursor.com/git/ritvik-indupuri/tmp-da7d143fe8c6b9b4.git FathomK8
+git clone https://github.com/ritvikindupuri/FathomK8.git FathomK8
 cd FathomK8
 ./run.sh
 ```
@@ -103,7 +138,7 @@ cd FathomK8
 Windows, in Command Prompt or PowerShell:
 
 ```bat
-git clone https://origin.cursor.com/git/ritvik-indupuri/tmp-da7d143fe8c6b9b4.git FathomK8
+git clone https://github.com/ritvikindupuri/FathomK8.git FathomK8
 cd FathomK8
 npm install
 npm run dev
@@ -116,7 +151,7 @@ The dev server listens on http://127.0.0.1:3847. A production build is `npm run 
 Same compose file. Clone the repository on the host and leave it running:
 
 ```bash
-git clone https://origin.cursor.com/git/ritvik-indupuri/tmp-da7d143fe8c6b9b4.git FathomK8
+git clone https://github.com/ritvikindupuri/FathomK8.git FathomK8
 cd FathomK8
 docker compose up -d
 ```
@@ -220,7 +255,7 @@ The header is on every page: the word **Fathom** (the home link), the owner name
 1. The crumb **Repositories** returns to the overview.
 2. The title is the repository. Under it: branch, seven-character commit, scan time, and renderer notes. Those notes look like `Helm payments-platform`, `Kustomize overlays/prod`, or `Manifest <file>`. Notes that say the renderer failed are omitted from this line. The impact at the right is the worst workload. Hover it.
 3. When there is an earlier commit, a line shows the change since that commit. It is orange (`#f76808`) when the score rose, green when it fell, and muted when it did not change. On a fresh demo, `payments-platform` is 50 and that change is −50. `platform-gitops` is 90 and that change is −10.
-4. **Impact by commit** is the timeline. Hover a point. The tooltip shows the score, then the date, author, subject, and `PR <n>` when one was found. Click a point to pin that commit. The line under the chart then reads that caption plus `impact <score>`. Until you click, the line is the latest commit.
+4. **Impact by commit** is the timeline. Hover a point. The tooltip shows the score, then the date, author, subject, and `PR <n>` when one was found. Click a point to pin that commit. The line under the chart is that caption plus `impact <score>`. Until you click, the line is the latest commit, with the same `impact <score>` suffix.
 5. **Workloads** lists every rendered workload, highest impact first. The columns are name and namespace, kind, impact (hover for factors), and a one-line reach summary.
 6. A repository with no workloads says "No workloads in the rendered manifests." A committed secret is called out in red above the chart. Secret values are not shown.
 7. Click a workload name.

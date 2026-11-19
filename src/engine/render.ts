@@ -1,4 +1,4 @@
-import { execFile } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import fs from "fs/promises";
 import path from "path";
 import { promisify } from "util";
@@ -25,6 +25,22 @@ function toolEnv(): NodeJS.ProcessEnv {
   const home = process.env.HOME || "";
   const extra = path.join(home, ".local/bin");
   return { ...process.env, PATH: `${extra}${path.delimiter}${process.env.PATH || ""}` };
+}
+
+export function missingRenderTools(): string[] {
+  const checks: { command: string; args: string[] }[] = [
+    { command: "helm", args: ["version", "--client", "--short"] },
+    { command: "kustomize", args: ["version"] },
+  ];
+  const missing: string[] = [];
+  for (const check of checks) {
+    try {
+      execFileSync(check.command, check.args, { env: toolEnv(), stdio: "ignore" });
+    } catch {
+      missing.push(check.command);
+    }
+  }
+  return missing;
 }
 
 async function run(command: string, args: string[], cwd: string): Promise<string> {

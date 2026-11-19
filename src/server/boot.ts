@@ -1,4 +1,5 @@
 import path from "path";
+import { missingRenderTools } from "@/engine/render";
 import { scanRepository } from "@/engine/scan-repo";
 import { demoRoot, ensureDemos, toggleEmergency } from "./demo-repos";
 import { cloneAndScan, defaultBranch, githubOwner, headSha, matchingRepos, parseGithubRepoUrl } from "./github";
@@ -22,7 +23,16 @@ async function scanDemos() {
   return [paymentsScan, gitopsScan];
 }
 
+function warnIfRenderToolsMissing() {
+  const missing = missingRenderTools();
+  if (missing.length === 0) return;
+  console.warn(
+    `Fathom: ${missing.join(" and ")} not found on PATH. Demo scans need Helm 3 and Kustomize 5. Without helm, payments-platform fails with "spawn helm ENOENT". Without kustomize, platform-gitops fails with "spawn kustomize ENOENT". Install both and restart. Commands are in the README under "Local, without Docker".`,
+  );
+}
+
 async function boot() {
+  warnIfRenderToolsMissing();
   const demos = await scanDemos();
   const token = process.env.GITHUB_TOKEN;
   store.patch({
