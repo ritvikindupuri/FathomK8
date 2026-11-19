@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 96" role="img" aria-label="Fathom">
+  <g fill="none"><polygon points="48.00,8.00 82.64,28.00 82.64,68.00 48.00,88.00 13.36,68.00 13.36,28.00" fill="none" stroke="#2a313a" stroke-width="1.6" stroke-linejoin="round"/><polygon points="48.00,20.00 72.25,34.00 72.25,62.00 48.00,76.00 23.75,62.00 23.75,34.00" fill="none" stroke="#3d4654" stroke-width="1.6" stroke-linejoin="round"/><polygon points="48.00,32.00 61.86,40.00 61.86,56.00 48.00,64.00 34.14,56.00 34.14,40.00" fill="none" stroke="#6ea8fe" stroke-width="1.8" stroke-linejoin="round"/><circle cx="48" cy="48" r="3.4" fill="#6ea8fe"/></g>
+  <text x="112" y="58" fill="#0f1214" font-family="Inter, Helvetica, Arial, sans-serif" font-size="28" font-weight="600" letter-spacing="7">FATHOM</text>
+</svg>

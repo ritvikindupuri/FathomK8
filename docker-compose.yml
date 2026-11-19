@@ -1,0 +1,16 @@
+services:
+  fathom:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3847:3847"
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_OWNER: ${GITHUB_OWNER:-ritvikindupuri}
+      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-120000}
+    volumes:
+      - fathom-data:/app/.data
+
+volumes:
+  fathom-data:
