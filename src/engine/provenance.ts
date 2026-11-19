@@ -41,7 +41,7 @@ export function blameFile(repo: string, file: string, token?: string): Provenanc
     body = output.match(/^summary (.+)$/m)?.[1] || "";
   }
   const subject = body.split("\n")[0] || output.match(/^summary (.+)$/m)?.[1] || "";
-  const pr = Number(body.match(/Demo-PR:\s*(\d+)/)?.[1] || "");
+  const pr = pullRequestNumber(body);
   return {
     sha,
     short: sha.slice(0, 7),
@@ -53,6 +53,15 @@ export function blameFile(repo: string, file: string, token?: string): Provenanc
     file,
     line: lineNo,
   };
+}
+
+export function pullRequestNumber(message: string): number | undefined {
+  const patterns = [/Merge pull request #(\d+)\b/i, /\(#(\d+)\)\s*$/m, /github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)\b/];
+  for (const pattern of patterns) {
+    const value = Number(message.match(pattern)?.[1] || "");
+    if (value) return value;
+  }
+  return undefined;
 }
 
 export interface SourceFile {

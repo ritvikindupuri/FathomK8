@@ -1,5 +1,4 @@
-import { scanPushed } from "@/server/boot";
-import { githubOwner } from "@/server/github";
+import { ready, scanPushed } from "@/server/boot";
 import { verifyGithubSignature } from "@/server/webhook";
 
 export const dynamic = "force-dynamic";
@@ -22,10 +21,9 @@ export async function POST(request: Request) {
   };
   const owner = payload.repository?.owner?.login || "";
   const name = payload.repository?.name || "";
-  if (payload.deleted || !name || owner.toLowerCase() !== githubOwner().toLowerCase()) {
-    return Response.json({ ok: true, ignored: true });
-  }
+  if (payload.deleted || !name || !owner) return Response.json({ ok: true, ignored: true });
+  await ready();
   const branch = (payload.ref || "").replace("refs/heads/", "") || undefined;
-  await scanPushed(name, branch);
-  return Response.json({ ok: true });
+  const updated = await scanPushed(owner, name, branch);
+  return Response.json({ ok: true, ignored: !updated });
 }

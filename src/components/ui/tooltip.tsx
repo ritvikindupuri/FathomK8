@@ -15,8 +15,8 @@ export function Tooltip({ children, content, wide, side = "bottom" }: { children
           side={side}
           sideOffset={6}
           className={cn(
-            "z-50 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs leading-5 text-foreground shadow-none",
-            wide ? "w-72" : "max-w-xs",
+            "z-50 rounded-md border border-border bg-surface px-4 py-3 text-sm leading-6 text-foreground shadow-none",
+            wide ? "w-[24rem] max-w-[calc(100vw-2rem)]" : "max-w-xs",
           )}
         >
           {content}

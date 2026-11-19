@@ -35,7 +35,7 @@ export function missingRenderTools(): string[] {
   const missing: string[] = [];
   for (const check of checks) {
     try {
-      execFileSync(check.command, check.args, { env: toolEnv(), stdio: "ignore" });
+      execFileSync(/* turbopackIgnore: true */ check.command, check.args, { env: toolEnv(), stdio: "ignore" });
     } catch {
       missing.push(check.command);
     }

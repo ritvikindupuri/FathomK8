@@ -5,11 +5,11 @@ type Listener = (event: string, data: unknown) => void;
 function createStore() {
   let snapshot: Snapshot = {
     revision: 0,
-    owner: process.env.GITHUB_OWNER || "ritvikindupuri",
+    owner: "",
     viewers: 0,
-    scanning: true,
+    scanning: false,
     lastEvent: null,
-    github: { status: "no-token", detail: "Demo corpus only until a GitHub token is set." },
+    github: { status: "ready", detail: "Paste a GitHub repository URL to scan it." },
     repos: [],
   };
   const listeners = new Set<Listener>();

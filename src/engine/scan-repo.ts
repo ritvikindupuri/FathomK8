@@ -4,7 +4,7 @@ import os from "os";
 import path from "path";
 import { promisify } from "util";
 import { analyze } from "./analyze";
-import { blameFile, loadSourceIndex, matchSource } from "./provenance";
+import { blameFile, loadSourceIndex, matchSource, pullRequestNumber } from "./provenance";
 import { renderRepository } from "./render";
 import { severity } from "./score";
 import type { Finding, RepoScan, TimelinePoint } from "./types";
@@ -35,8 +35,9 @@ async function commits(repo: string, limit = 12): Promise<CommitInfo[]> {
     .map((record) => {
       const [sha, date, author, subject, ...rest] = record.split("\x1f");
       const body = rest.join("\x1f");
-      const pr = Number(body.match(/Demo-PR:\s*(\d+)/)?.[1] || "");
-      return { sha, date, author, subject: subject?.trim() || "", pr: pr || undefined };
+      const subjectText = subject?.trim() || "";
+      const pr = pullRequestNumber(`${subjectText}\n${body}`);
+      return { sha, date, author, subject: subjectText, pr };
     });
 }
 
@@ -87,11 +88,10 @@ export async function scanRepository(options: {
   dir: string;
   owner: string;
   name: string;
-  source: "demo" | "github";
   htmlUrl?: string;
   token?: string;
 }): Promise<RepoScan> {
-  const { dir, owner, name, source, htmlUrl, token } = options;
+  const { dir, owner, name, htmlUrl, token } = options;
   const scannedAt = new Date().toISOString();
   const branch = (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => "HEAD")).trim();
   const head = (await git(dir, ["rev-parse", "HEAD"]).catch(() => "")).trim();
@@ -107,7 +107,7 @@ export async function scanRepository(options: {
     }
   }
 
-  if (token && source === "github") {
+  if (token) {
     const pending = new Map<string, Finding[]>();
     for (const workload of analysis.workloads) {
       for (const finding of workload.findings) {
@@ -148,7 +148,7 @@ export async function scanRepository(options: {
     id: `${owner}/${name}`,
     owner,
     name,
-    source,
+    source: "github",
     htmlUrl,
     branch: branch === "HEAD" ? "main" : branch,
     commit: head,

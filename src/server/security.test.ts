@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { looksLikeKubernetes, parseGithubRepoUrl } from "./github";
+import { parseGithubRepoUrl } from "./github";
+import { pullRequestNumber } from "../engine/provenance";
 import { verifyGithubSignature } from "./webhook";
 import { createHmac } from "crypto";
 
-describe("github filters", () => {
-  it("accepts charts, kustomize, and manifest paths", () => {
-    expect(looksLikeKubernetes(["charts/payments/Chart.yaml"])).toBe(true);
-    expect(looksLikeKubernetes(["deploy/overlays/prod/kustomization.yaml"])).toBe(true);
-    expect(looksLikeKubernetes(["k8s/web/deployment.yaml"])).toBe(true);
-  });
-
+describe("github urls", () => {
   it("reads a public GitHub URL and rejects anything else", () => {
     expect(parseGithubRepoUrl("https://github.com/ritvikindupuri/k8s-cluster-admin-escalation-mapper")).toEqual({
       owner: "ritvikindupuri",
@@ -19,9 +14,11 @@ describe("github filters", () => {
     expect(parseGithubRepoUrl("https://gitlab.com/acme/charts")).toBeNull();
   });
 
-  it("ignores workflows and ordinary yaml", () => {
-    expect(looksLikeKubernetes([".github/workflows/ci.yml", "README.md"])).toBe(false);
-    expect(looksLikeKubernetes(["docs/config.yaml"])).toBe(false);
+  it("reads a pull request number from a real commit message", () => {
+    expect(pullRequestNumber("Merge pull request #33 from acme/scope-role")).toBe(33);
+    expect(pullRequestNumber("Scope the checkout role (#18)")).toBe(18);
+    expect(pullRequestNumber("See https://github.com/acme/charts/pull/7")).toBe(7);
+    expect(pullRequestNumber("Demo-PR: 33")).toBeUndefined();
   });
 });
 

@@ -1,19 +1,16 @@
 "use client";
 
 import type { ScoreFactor } from "@/engine/types";
-import { unionText } from "@/lib/format";
+import { BAND_LEGEND, bandName, combineSentence, factorSentence, scoreMeaning } from "@/lib/score-copy";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { ReactNode } from "react";
 
-function FactorList({ factors }: { factors: ScoreFactor[] }) {
-  if (factors.length === 0) return <p className="text-muted">No reachable outcome.</p>;
+function ReasonList({ factors }: { factors: ScoreFactor[] }) {
+  if (factors.length === 0) return <p>Nothing beyond this workload is reachable.</p>;
   return (
-    <ul>
+    <ul className="mt-2 space-y-1.5">
       {factors.map((factor) => (
-        <li key={factor.id} className="flex items-baseline justify-between gap-4">
-          <span className="text-muted">{factor.label}</span>
-          <span className="tabular-nums">{factor.points}</span>
-        </li>
+        <li key={factor.id}>{factorSentence(factor)}</li>
       ))}
     </ul>
   );
@@ -21,10 +18,12 @@ function FactorList({ factors }: { factors: ScoreFactor[] }) {
 
 export function ScoreTip({
   factors,
+  score,
   note,
   children,
 }: {
   factors: ScoreFactor[];
+  score: number;
   note?: string;
   children: ReactNode;
 }) {
@@ -32,11 +31,17 @@ export function ScoreTip({
     <Tooltip
       wide
       content={
-        <div>
-          <FactorList factors={factors} />
-          <p className="mt-2 text-muted">{unionText(factors.map((factor) => factor.points))}</p>
-          {note ? <p className="mt-1 text-muted">{note}</p> : null}
-          <p className="mt-2 border-t border-border pt-2 text-muted">100 = full cluster takeover.</p>
+        <div className="space-y-3 text-sm leading-6">
+          <p>{scoreMeaning(score)}</p>
+          <p>
+            This score is {bandName(score).toLowerCase()}. {BAND_LEGEND}
+          </p>
+          <div>
+            <p className="font-medium text-foreground">Why this score</p>
+            <ReasonList factors={factors} />
+          </div>
+          <p>{combineSentence(factors)}</p>
+          {note ? <p>{note}</p> : null}
         </div>
       }
     >
@@ -68,17 +73,19 @@ export function FixTip({
     <Tooltip
       wide
       content={
-        <div>
-          <p className="text-muted">Before {before}</p>
-          <FactorList factors={factors} />
-          <p className="mt-2 text-muted">Removed</p>
-          <FactorList factors={taken} />
-          <p className="mt-2 text-muted">After {after}</p>
-          <FactorList factors={afterFactors} />
-          <p className="mt-2 text-muted">
-            {shrink} points leave the score. {unionText(afterFactors.map((factor) => factor.points))}
+        <div className="space-y-3 text-sm leading-6">
+          <p>
+            This change lowers the blast radius from {before} to {after}, by {shrink} points.
           </p>
-          <p className="mt-2 border-t border-border pt-2 text-muted">100 = full cluster takeover.</p>
+          <div>
+            <p className="font-medium text-foreground">It removes</p>
+            <ReasonList factors={taken} />
+          </div>
+          <div>
+            <p className="font-medium text-foreground">What would still be reachable</p>
+            <ReasonList factors={afterFactors} />
+          </div>
+          <p>{combineSentence(afterFactors)}</p>
         </div>
       }
     >
@@ -88,5 +95,5 @@ export function FixTip({
 }
 
 export function scoreTrigger(className: string) {
-  return `cursor-help border-0 bg-transparent p-0 text-left font-[inherit] ${className}`;
+  return `cursor-help rounded-sm border-0 bg-transparent p-0 text-left font-[inherit] underline decoration-dotted decoration-current/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${className}`;
 }

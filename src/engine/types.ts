@@ -117,7 +117,7 @@ export interface RepoScan {
   id: string;
   owner: string;
   name: string;
-  source: "demo" | "github";
+  source: "github";
   htmlUrl?: string;
   branch: string;
   commit: string;
@@ -132,7 +132,7 @@ export interface RepoScan {
 }
 
 export interface GithubStatus {
-  status: "no-token" | "discovering" | "scanning" | "ready" | "error";
+  status: "scanning" | "ready" | "error";
   detail: string;
 }
 

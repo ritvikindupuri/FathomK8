@@ -1,12 +1,12 @@
-import path from "path";
 import { missingRenderTools } from "@/engine/render";
-import { scanRepository } from "@/engine/scan-repo";
-import { demoRoot, ensureDemos, toggleEmergency } from "./demo-repos";
-import { cloneAndScan, defaultBranch, githubOwner, headSha, matchingRepos, parseGithubRepoUrl } from "./github";
+import type { RepoScan } from "@/engine/types";
+import { remember, readTracked } from "./catalog";
+import { cloneAndScan, defaultBranch, parseGithubRepoUrl, remoteHead } from "./github";
 import { store } from "./store";
 
 let readyPromise: Promise<void> | null = null;
 let pollStarted = false;
+let polling = false;
 const seenSha = new Map<string, string>();
 
 export function ready(): Promise<void> {
@@ -14,176 +14,153 @@ export function ready(): Promise<void> {
   return readyPromise;
 }
 
-async function scanDemos() {
-  const { payments, gitops } = await ensureDemos();
-  const [paymentsScan, gitopsScan] = await Promise.all([
-    scanRepository({ dir: payments, owner: "demo", name: "payments-platform", source: "demo" }),
-    scanRepository({ dir: gitops, owner: "demo", name: "platform-gitops", source: "demo" }),
-  ]);
-  return [paymentsScan, gitopsScan];
-}
-
 function warnIfRenderToolsMissing() {
   const missing = missingRenderTools();
   if (missing.length === 0) return;
   console.warn(
-    `Fathom: ${missing.join(" and ")} not found on PATH. Demo scans need Helm 3 and Kustomize 5. Without helm, payments-platform fails with "spawn helm ENOENT". Without kustomize, platform-gitops fails with "spawn kustomize ENOENT". Install both and restart. Commands are in the README under "Local, without Docker".`,
+    `Fathom: ${missing.join(" and ")} not found on PATH. Helm charts and Kustomize overlays in a scanned repository cannot be rendered. Install both and restart. Commands are in the README under Setup.`,
   );
+}
+
+function watchingDetail(): string {
+  const count = store.get().repos.length;
+  if (count === 0) return "Paste a GitHub repository URL to scan it.";
+  if (count === 1) return "Watching 1 repository for new commits.";
+  return `Watching ${count} repositories for new commits.`;
+}
+
+function failedScan(owner: string, name: string, branch: string, message: string): RepoScan {
+  return {
+    id: `${owner}/${name}`,
+    owner,
+    name,
+    source: "github",
+    htmlUrl: `https://github.com/${owner}/${name}`,
+    branch,
+    commit: "",
+    scannedAt: new Date().toISOString(),
+    score: 0,
+    severity: "low",
+    workloads: [],
+    timeline: [],
+    notes: [],
+    error: message,
+    committedSecrets: [],
+  };
 }
 
 async function boot() {
   warnIfRenderToolsMissing();
-  const demos = await scanDemos();
-  const token = process.env.GITHUB_TOKEN;
   store.patch({
-    owner: githubOwner(),
-    repos: demos,
+    repos: [],
     scanning: false,
-    lastEvent: "Demo corpus ready",
-    github: token
-      ? { status: "discovering", detail: `Looking through ${githubOwner()}'s repositories.` }
-      : { status: "no-token", detail: "Demo corpus only. Set GITHUB_TOKEN to scan ritvikindupuri." },
+    lastEvent: null,
+    github: { status: "ready", detail: "Paste a GitHub repository URL to scan it." },
   });
-  if (token) {
-    void discover().catch((error: unknown) => {
-      store.patch({
-        scanning: false,
-        github: { status: "error", detail: error instanceof Error ? error.message : "GitHub scan failed." },
-      });
-    });
-    startPolling();
-  }
-}
-
-export async function discover() {
-  const token = process.env.GITHUB_TOKEN;
-  const owner = githubOwner();
-  store.patch({
-    scanning: true,
-    github: { status: "discovering", detail: `Looking through ${owner}'s repositories.` },
-  });
-  const matched = await matchingRepos(token);
-  store.patch({
-    github: {
-      status: "scanning",
-      detail: matched.length
-        ? `Scanning ${matched.length} ${matched.length === 1 ? "repository" : "repositories"} with Kubernetes manifests.`
-        : `No Kubernetes manifests in the repositories checked for ${owner}.`,
-    },
-  });
-  for (const repo of matched) {
-    try {
-      const scan = await cloneAndScan(owner, repo, token);
-      seenSha.set(scan.id, scan.commit);
-      store.upsert(scan, `${repo.name} scanned`);
-    } catch (error) {
-      store.upsert(
-        {
-          id: `${owner}/${repo.name}`,
-          owner,
-          name: repo.name,
-          source: "github",
-          htmlUrl: repo.htmlUrl,
-          branch: repo.branch,
-          commit: "",
-          scannedAt: new Date().toISOString(),
-          score: 0,
-          severity: "low",
-          workloads: [],
-          timeline: [],
-          notes: [],
-          error: error instanceof Error ? error.message : "Scan failed.",
-          committedSecrets: [],
-        },
-        `${repo.name} failed`,
-      );
+  const tracked = await readTracked();
+  if (tracked.length > 0) {
+    store.patch({ scanning: true });
+    const token = process.env.GITHUB_TOKEN || undefined;
+    for (const repo of tracked) {
+      try {
+        const scan = await cloneAndScan(repo.owner, repo.name, token, repo.branch);
+        seenSha.set(scan.id, scan.commit);
+        store.upsert(scan);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Scan failed.";
+        store.upsert(failedScan(repo.owner, repo.name, repo.branch, message));
+      }
     }
+    store.patch({ scanning: false, github: { status: "ready", detail: watchingDetail() } });
   }
-  store.patch({
-    scanning: false,
-    github: {
-      status: "ready",
-      detail: matched.length
-        ? `Scanned ${matched.length} of ${owner}'s repositories that contain manifests.`
-        : `No Kubernetes manifests found for ${owner}.`,
-    },
-  });
-}
-
-export async function rescanAll() {
-  store.patch({ scanning: true, lastEvent: "Scanning" });
-  const demos = await scanDemos();
-  const githubRepos = store.get().repos.filter((repo) => repo.source === "github");
-  store.patch({ repos: [...demos, ...githubRepos], scanning: !!process.env.GITHUB_TOKEN, lastEvent: "Demo corpus updated" });
-  if (process.env.GITHUB_TOKEN) await discover();
-}
-
-export async function simulatePush() {
-  store.patch({ scanning: true });
-  const dir = path.join(demoRoot(), "payments-platform");
-  const action = await toggleEmergency(dir);
-  const scan = await scanRepository({ dir, owner: "demo", name: "payments-platform", source: "demo" });
-  const repos = [...store.get().repos.filter((repo) => repo.id !== scan.id), scan];
-  store.patch({
-    repos,
-    scanning: false,
-    lastEvent: action === "added" ? "payments-platform · emergency backup added" : "payments-platform · emergency backup reverted",
-  });
-  return { action, score: scan.score };
+  startPolling();
 }
 
 export async function scanPublicRepo(url: string) {
   const parsed = parseGithubRepoUrl(url);
-  if (!parsed) throw new Error("Use a public GitHub URL, like https://github.com/owner/repo.");
-  const branch = await defaultBranch(parsed.owner, parsed.name);
+  if (!parsed) throw new Error("Use a GitHub URL, like https://github.com/owner/repo.");
+  const token = process.env.GITHUB_TOKEN || undefined;
   store.patch({ scanning: true, lastEvent: `Cloning ${parsed.owner}/${parsed.name}` });
   try {
-    const scan = await cloneAndScan(parsed.owner, parsed.name, undefined, branch);
+    const branch = await defaultBranch(parsed.owner, parsed.name, token);
+    const scan = await cloneAndScan(parsed.owner, parsed.name, token, branch);
     seenSha.set(scan.id, scan.commit);
-    store.upsert(scan, `${parsed.name} scanned`);
-    store.patch({
-      scanning: false,
-      github: { status: "ready", detail: `Public repository ${parsed.owner}/${parsed.name}.` },
-    });
+    await remember({ owner: scan.owner, name: scan.name, branch: scan.branch });
+    store.upsert(scan, `${scan.owner}/${scan.name} scanned`);
+    store.patch({ scanning: false, github: { status: "ready", detail: watchingDetail() } });
     return scan;
   } catch (error) {
-    store.patch({ scanning: false, lastEvent: "Public scan failed" });
+    store.patch({ scanning: false, github: { status: "ready", detail: watchingDetail() } });
     throw error;
   }
 }
 
-export async function scanPushed(name: string, branch?: string) {
-  const token = process.env.GITHUB_TOKEN;
-  const owner = githubOwner();
-  store.patch({ scanning: true, lastEvent: `${name} push received` });
-  const scan = await cloneAndScan(owner, name, token, branch);
-  seenSha.set(scan.id, scan.commit);
-  const repos = [...store.get().repos.filter((repo) => repo.id !== scan.id), scan];
-  store.patch({ repos, scanning: false, lastEvent: `${name} updated from push` });
+export async function scanPushed(owner: string, name: string, branch?: string): Promise<boolean> {
+  const existing = store.get().repos.find((repo) => repo.owner.toLowerCase() === owner.toLowerCase() && repo.name.toLowerCase() === name.toLowerCase());
+  if (!existing) return false;
+  const token = process.env.GITHUB_TOKEN || undefined;
+  store.patch({ scanning: true, lastEvent: `${existing.owner}/${existing.name} push received` });
+  try {
+    const scan = await cloneAndScan(existing.owner, existing.name, token, branch || existing.branch);
+    seenSha.set(scan.id, scan.commit);
+    await remember({ owner: scan.owner, name: scan.name, branch: scan.branch });
+    store.upsert(scan, `${scan.owner}/${scan.name} updated from push`);
+    store.patch({ scanning: false, github: { status: "ready", detail: watchingDetail() } });
+    return true;
+  } catch (error) {
+    store.patch({
+      scanning: false,
+      github: { status: "error", detail: error instanceof Error ? error.message : "Rescan failed." },
+    });
+    throw error;
+  }
 }
 
 function startPolling() {
   if (pollStarted) return;
   pollStarted = true;
-  const interval = Number(process.env.POLL_INTERVAL_MS || 120_000);
+  const raw = process.env.POLL_INTERVAL_MS;
+  const interval = raw === undefined || raw === "" ? 120_000 : Number(raw);
   if (!interval) return;
   const timer = setInterval(() => {
     void poll().catch((error: unknown) => {
-      store.patch({ github: { status: "error", detail: error instanceof Error ? error.message : "Polling failed." } });
+      store.patch({
+        scanning: false,
+        github: { status: "error", detail: error instanceof Error ? error.message : "Polling failed." },
+      });
     });
   }, interval);
   timer.unref?.();
 }
 
 async function poll() {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) return;
-  const repos = store.get().repos.filter((repo) => repo.source === "github" && repo.branch);
-  for (const repo of repos) {
-    const sha = await headSha(repo.owner, repo.name, repo.branch, token);
-    if (!sha || sha === seenSha.get(repo.id) || sha === repo.commit) continue;
-    const scan = await cloneAndScan(repo.owner, repo.name, token, repo.branch);
-    seenSha.set(scan.id, scan.commit);
-    store.upsert(scan, `${repo.name} changed on ${repo.branch}`);
+  if (polling || store.get().scanning) return;
+  polling = true;
+  try {
+    const token = process.env.GITHUB_TOKEN || undefined;
+    const repos = store.get().repos.filter((repo) => repo.branch);
+    let changed = false;
+    for (const repo of repos) {
+      const sha = await remoteHead(repo.owner, repo.name, repo.branch, token);
+      if (!sha || sha === seenSha.get(repo.id) || sha === repo.commit) continue;
+      changed = true;
+      store.patch({ scanning: true });
+      try {
+        const scan = await cloneAndScan(repo.owner, repo.name, token, repo.branch);
+        seenSha.set(scan.id, scan.commit);
+        store.upsert(scan, `${repo.owner}/${repo.name} changed on ${repo.branch}`);
+      } catch (error) {
+        store.patch({
+          github: { status: "error", detail: error instanceof Error ? error.message : "Rescan failed." },
+        });
+      } finally {
+        store.patch({ scanning: false });
+      }
+    }
+    if (changed && store.get().github.status !== "error") {
+      store.patch({ github: { status: "ready", detail: watchingDetail() } });
+    }
+  } finally {
+    polling = false;
   }
 }
