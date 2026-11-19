@@ -51,6 +51,8 @@ export function manifestsFromValue(value: unknown, file?: string, fallbackNamesp
   if (Array.isArray(value.rules) && spec.rules === undefined) spec.rules = value.rules;
   if (Array.isArray(value.subjects) && spec.subjects === undefined) spec.subjects = value.subjects;
   if (isRecord(value.roleRef) && spec.roleRef === undefined) spec.roleRef = value.roleRef;
+  if (isRecord(value.aggregationRule) && spec.aggregationRule === undefined) spec.aggregationRule = value.aggregationRule;
+  if (typeof value.type === "string" && spec.type === undefined) spec.type = value.type;
   return [
     {
       apiVersion: typeof value.apiVersion === "string" ? value.apiVersion : "",

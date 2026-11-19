@@ -3,26 +3,30 @@
 import type { RepoScan } from "@/engine/types";
 import { ImpactChart } from "@/components/impact-chart";
 import { ScoreTip, scoreTrigger } from "@/components/score-tip";
-import { delta, formatDate, severityColor } from "@/lib/format";
+import { delta, formatDelta, formatScanDate, severityColor } from "@/lib/format";
 import Link from "next/link";
 
-function plainNote(note: string): string {
-  if (note.startsWith("Helm ")) return `Helm chart ${note.slice(5)}`;
-  if (note.startsWith("Kustomize ")) return `Kustomize overlay ${note.slice(10)}`;
-  if (note.startsWith("Manifest ")) return `manifest ${note.slice(9)}`;
+function scannedFile(note: string): string | null {
+  if (note.toLowerCase().includes("failed")) return null;
+  if (note.startsWith("Manifest ")) return note.slice("Manifest ".length);
+  if (note.startsWith("Helm ")) {
+    const rest = note.slice("Helm ".length).replace(/\/$/, "");
+    if (!rest || rest === "." || !rest.includes("/")) return "Chart.yaml";
+    return `${rest}/Chart.yaml`;
+  }
+  if (note.startsWith("Kustomize ")) {
+    const rest = note.slice("Kustomize ".length).replace(/\/$/, "");
+    if (!rest || rest === ".") return "kustomization.yaml";
+    return `${rest}/kustomization.yaml`;
+  }
   return note;
-}
-
-function changeSentence(change: number): string {
-  if (change === 0) return "The score is unchanged since the previous commit.";
-  if (change < 0) return `The score fell by ${Math.abs(change)} since the previous commit.`;
-  return `The score rose by ${change} since the previous commit.`;
 }
 
 export function RepoView({ repo, base, section }: { repo: RepoScan; base: string; section: "overview" | "workloads" }) {
   const change = delta(repo.timeline);
   const short = repo.commit.slice(0, 7);
-  const notes = repo.notes.filter((note) => !note.includes("failed")).map(plainNote);
+  const files = [...new Set(repo.notes.map(scannedFile).filter((file): file is string => Boolean(file)))];
+  const commitUrl = /^[0-9a-f]{7,}$/i.test(repo.commit) && repo.htmlUrl ? `${repo.htmlUrl.replace(/\/$/, "")}/commit/${repo.commit}` : "";
   const worst = repo.workloads[0];
   const graphHref = worst
     ? `${base}/r/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/w/${encodeURIComponent(worst.namespace)}/${encodeURIComponent(worst.kind)}/${encodeURIComponent(worst.name)}`
@@ -38,14 +42,35 @@ export function RepoView({ repo, base, section }: { repo: RepoScan; base: string
       <div className="mt-6 flex flex-wrap items-end justify-between gap-8">
         <div className="max-w-2xl">
           <h1 className="text-3xl font-semibold tracking-tight">{repo.name}</h1>
-          <p className="mt-4 text-base leading-7 text-muted">
-            Branch {repo.branch || "unknown"} · commit {short || "uncommitted"} · scanned {formatDate(repo.scannedAt)}
-            {notes.length ? ` · built from ${notes.join(", ")}` : ""}
+          <p className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-base leading-7 text-muted">
+            <span>
+              {repo.branch || "unknown"}
+              {" · "}
+              {commitUrl ? (
+                <a href={commitUrl} className="underline decoration-dotted underline-offset-4 hover:text-foreground">
+                  {short}
+                </a>
+              ) : (
+                short || "uncommitted"
+              )}
+              {" · Scanned "}
+              {formatScanDate(repo.scannedAt)}
+            </span>
+            {change !== null && change !== 0 ? (
+              <span className="inline-flex items-center rounded border border-border px-2 py-0.5 text-sm" style={{ color: change > 0 ? "var(--high)" : "var(--ok)" }}>
+                {change > 0 ? "▲" : "▼"} {formatDelta(change)} since last commit
+              </span>
+            ) : null}
           </p>
-          {change !== null ? (
-            <p className="mt-3 text-base leading-7" style={{ color: change > 0 ? "var(--high)" : change < 0 ? "var(--ok)" : "var(--muted)" }}>
-              {changeSentence(change)}
-            </p>
+          {files.length > 0 ? (
+            <details className="mt-3 text-sm text-muted">
+              <summary className="cursor-pointer">Files scanned ({files.length})</summary>
+              <ul className="mt-2 space-y-1">
+                {files.map((file) => (
+                  <li key={file}>{file}</li>
+                ))}
+              </ul>
+            </details>
           ) : null}
           {repo.error ? <p className="mt-4 text-base text-critical">{repo.error}</p> : null}
           {repo.committedSecrets.length > 0 ? (
@@ -69,6 +94,36 @@ export function RepoView({ repo, base, section }: { repo: RepoScan; base: string
           )}
         </div>
       </div>
+
+      {section === "overview" && repo.cuts && repo.cuts.length > 0 ? (
+        <section className="mt-10">
+          <h2 className="text-xl font-semibold">Changes that break the most paths</h2>
+          <ul className="mt-4 max-w-3xl space-y-3 text-base leading-7">
+            {repo.cuts.slice(0, 3).map((cut) => (
+              <li key={cut.title}>
+                <span className="font-medium">{cut.title}</span>
+                <span className="text-muted">
+                  {" "}
+                  — breaks {cut.paths} path{cut.paths === 1 ? "" : "s"}. {cut.detail}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {section === "overview" && repo.standing && repo.standing.length > 0 ? (
+        <section className="mt-10">
+          <h2 className="text-xl font-semibold">Standing exposures</h2>
+          <ul className="mt-4 max-w-3xl space-y-3 text-base leading-7 text-muted">
+            {repo.standing.slice(0, 3).map((note) => (
+              <li key={note.title}>
+                <span className="font-medium text-foreground">{note.title}.</span> {note.detail}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {repo.caveat ? <p className="mt-6 max-w-3xl text-base leading-7 text-muted">{repo.caveat}</p> : null}
 
       {section === "overview" ? (
         <section className="mt-14">

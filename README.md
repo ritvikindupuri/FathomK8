@@ -17,6 +17,7 @@ Fathom scores how much of a cluster an attacker could reach from one workload. I
 
 - **Blast radius.** 0–100 for one workload. 0–34 low, 35–64 moderate, 65–84 high, 85–100 critical.
 - **Attack graph.** The path from that workload to the cluster access, secrets, node, network, and cloud identity it can reach.
+- **Escalation paths.** The shortest chain from a workload to cluster admin: bind, escalate, impersonate, pod create, exec, token and secret minting, nodes/proxy, webhooks, and aws-auth. A fix names the grant that breaks the most paths.
 - **Real git history.** Each reason is blamed to the commit that introduced the line. The chart is the last 12 commits on the branch.
 - **Fixes.** Edits that lower the score by at least 5 points, with a patch. Nothing is written to the repository.
 - **Live updates.** Fathom polls the branch HEAD and rescans when it changes. A signed GitHub push webhook does the same.
@@ -30,7 +31,7 @@ Fathom scores how much of a cluster an attacker could reach from one workload. I
 1. You paste a GitHub URL and press **Scan**.
 2. Fathom clones that repository read-only.
 3. Helm, Kustomize, and plain YAML or JSON manifests are rendered.
-4. Each workload is scored. `git blame` and `git log` supply the commit, author, and pull request.
+4. Each workload is scored, including the shortest chain of permissions to cluster admin. `git blame` and `git log` supply the commit, author, and pull request.
 5. The dashboard updates. Polling, or a signed push webhook, rescans when that branch HEAD moves.
 
 Source: [`docs/images/architecture.svg`](docs/images/architecture.svg).
@@ -153,6 +154,6 @@ Webhook: payload URL `https://<your-host>/api/webhooks/github`, content type `ap
 1. Open http://127.0.0.1:3847. If you have not scanned anything, the page tells you to paste a repository.
 2. Paste a GitHub URL and press **Scan**. The button reads **Scanning** until the clone finishes, then that repository opens. One to try: `https://github.com/ritvikindupuri/k8s-cluster-admin-escalation-mapper`.
 3. Use the repository menu to switch repositories, or **All repositories** to go home.
-4. **Overview** is the repository list, or the timeline inside a repository. **Workloads**, **Attack graph**, and **Fixes** open the selected repository. On the home page they open the highest-risk repository once one exists.
+4. **Overview** is the repository list, or the timeline inside a repository. Under the name: branch, linked commit, and scan date. **Files scanned** stays collapsed. A badge appears only when the score changed. **Workloads**, **Attack graph**, and **Fixes** open the selected repository. On the home page they open the highest-risk repository once one exists. The attack graph draws a chain when one reaches cluster admin.
 5. Hover a blast radius. The tooltip says what 0–100 means, the band, and the reasons with the points each one adds. Those reasons do not add together. The score stays at or below 100.
 6. **Share** copies a read-only link. Someone with the link sees the same results as they update. They cannot scan or create another link.

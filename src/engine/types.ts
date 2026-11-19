@@ -113,6 +113,17 @@ export interface CommittedSecret {
   file?: string;
 }
 
+export interface PathCut {
+  title: string;
+  detail: string;
+  paths: number;
+}
+
+export interface StandingNote {
+  title: string;
+  detail: string;
+}
+
 export interface RepoScan {
   id: string;
   owner: string;
@@ -129,6 +140,9 @@ export interface RepoScan {
   notes: string[];
   error?: string;
   committedSecrets: CommittedSecret[];
+  cuts?: PathCut[];
+  standing?: StandingNote[];
+  caveat?: string;
 }
 
 export interface GithubStatus {

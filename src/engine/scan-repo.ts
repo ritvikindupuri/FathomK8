@@ -11,7 +11,7 @@ import type { Finding, RepoScan, TimelinePoint } from "./types";
 
 const exec = promisify(execFile);
 const scoreCache = new Map<string, number>();
-const ANALYZER_VERSION = "3";
+const ANALYZER_VERSION = "4";
 
 async function git(repo: string, args: string[]): Promise<string> {
   const result = await exec("git", ["-C", repo, ...args], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
@@ -160,5 +160,8 @@ export async function scanRepository(options: {
     notes: rendered.notes,
     error: rendered.error,
     committedSecrets: analysis.committedSecrets,
+    cuts: analysis.cuts,
+    standing: analysis.standing,
+    caveat: analysis.caveat,
   };
 }

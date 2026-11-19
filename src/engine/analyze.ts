@@ -1,3 +1,4 @@
+import { escalationReport, roleRules, type EscalationReport, type RoleRule } from "./escalate";
 import { repoScore, severity, unionScore } from "./score";
 import type { Manifest } from "./parse";
 import type {
@@ -8,7 +9,9 @@ import type {
   GraphEdge,
   GraphNode,
   NodeIcon,
+  PathCut,
   ScoreFactor,
+  StandingNote,
   WorkloadView,
 } from "./types";
 
@@ -18,6 +21,7 @@ interface Access {
   namespaceSecrets: boolean;
   podCreate: boolean;
   podExec: boolean;
+  execToken?: string;
   nodesProxy: boolean;
   proxyToken?: string;
   proxyFile?: string;
@@ -93,6 +97,7 @@ interface Asset {
   sourceKind?: string;
   sourceName?: string;
   fixOp: FixOp;
+  steps?: { label: string; caption: string; edge: string; icon: NodeIcon }[];
 }
 
 interface Model {
@@ -101,6 +106,7 @@ interface Model {
   services: Service[];
   policies: Policy[];
   secrets: Map<string, SecretInfo>;
+  escalation: EscalationReport;
 }
 
 const FIX_COPY: Record<FixOp, { title: string; detail: string }> = {
@@ -275,13 +281,24 @@ function extractWorkload(manifest: Manifest): Workload | null {
   };
 }
 
-function parseRules(manifest: Manifest): { verbs: string[]; resources: string[] }[] {
+function parseRules(manifest: Manifest): RoleRule[] {
   return asArray(manifest.spec.rules)
     .filter(isRecord)
     .map((rule) => ({
       verbs: asArray(rule.verbs).filter((verb): verb is string => typeof verb === "string"),
       resources: asArray(rule.resources).filter((resource): resource is string => typeof resource === "string"),
+      groups: asArray(rule.apiGroups).filter((group): group is string => typeof group === "string"),
+      names: asArray(rule.resourceNames).filter((name): name is string => typeof name === "string"),
     }));
+}
+
+function groupOk(rule: RoleRule, group: string): boolean {
+  if (!rule.groups.length) return true;
+  return rule.groups.includes("*") || rule.groups.includes(group);
+}
+
+function unbounded(rule: RoleRule): boolean {
+  return rule.names.length === 0;
 }
 
 function subjectsOf(manifest: Manifest): { kind: string; name: string; namespace?: string }[] {
@@ -295,7 +312,7 @@ function subjectsOf(manifest: Manifest): { kind: string; name: string; namespace
 }
 
 function buildModel(manifests: Manifest[]): Model {
-  const roles = new Map<string, { cluster: boolean; rules: { verbs: string[]; resources: string[] }[]; file?: string }>();
+  const roles = new Map<string, { cluster: boolean; rules: RoleRule[]; file?: string }>();
   const bindings: Manifest[] = [];
   const services: Service[] = [];
   const policies: Policy[] = [];
@@ -372,20 +389,29 @@ function buildModel(manifests: Manifest[]): Model {
       entry.bindingKind = binding.kind;
       entry.bindingFile = binding.sourceFile;
       if (clusterScoped && roleName === "cluster-admin") entry.clusterAdmin = true;
-      const rules = role?.rules || [];
+      const resolved = roleName ? roleRules(manifests, roleKind === "ClusterRole" ? "ClusterRole" : "Role", binding.metadata.namespace, roleName) : null;
+      const rules = resolved ?? role?.rules ?? [];
       for (const rule of rules) {
         const cluster = clusterScoped;
-        if (cluster && (has(rule.verbs, rule.resources, "*", "*") || (rule.verbs.includes("*") && rule.resources.includes("*")))) {
-          entry.clusterAdmin = true;
-        }
-        const secretVerbs = ["get", "list", "watch"].some((verb) => has(rule.verbs, rule.resources, verb, "secrets"));
+        const star = rule.verbs.includes("*") && rule.resources.includes("*") && unbounded(rule) && (rule.groups.includes("*") || rule.groups.length === 0);
+        if (cluster && star) entry.clusterAdmin = true;
+        const secretVerbs = unbounded(rule) && groupOk(rule, "") && ["get", "list", "watch"].some((verb) => has(rule.verbs, rule.resources, verb, "secrets"));
         if (secretVerbs && cluster) entry.clusterSecrets = true;
         if (secretVerbs && !cluster) entry.namespaceSecrets = true;
-        if (has(rule.verbs, rule.resources, "create", "pods")) {
-          if (cluster) entry.podCreate = true;
+        if (unbounded(rule) && groupOk(rule, "") && has(rule.verbs, rule.resources, "create", "pods") && cluster) entry.podCreate = true;
+        if (groupOk(rule, "") && has(rule.verbs, rule.resources, "create", "pods/exec")) {
+          entry.podExec = true;
+          entry.execToken = entry.execToken || "pods/exec";
         }
-        if (has(rule.verbs, rule.resources, "create", "pods/exec")) entry.podExec = true;
-        const proxyVerbs = ["get", "list", "watch", "create", "*"].some((verb) => has(rule.verbs, rule.resources, verb, "nodes/proxy"));
+        if (groupOk(rule, "") && has(rule.verbs, rule.resources, "create", "pods/attach")) {
+          entry.podExec = true;
+          entry.execToken = entry.execToken || "pods/attach";
+        }
+        if (groupOk(rule, "") && ["update", "patch"].some((verb) => has(rule.verbs, rule.resources, verb, "pods/ephemeralcontainers"))) {
+          entry.podExec = true;
+          entry.execToken = entry.execToken || "pods/ephemeralcontainers";
+        }
+        const proxyVerbs = groupOk(rule, "") && ["get", "list", "watch", "create", "*"].some((verb) => has(rule.verbs, rule.resources, verb, "nodes/proxy"));
         if (proxyVerbs) {
           entry.nodesProxy = true;
           if (role?.file) entry.proxyFile = role.file;
@@ -397,7 +423,7 @@ function buildModel(manifests: Manifest[]): Model {
     }
   }
 
-  return { workloads, access, services, policies, secrets };
+  return { workloads, access, services, policies, secrets, escalation: escalationReport(manifests) };
 }
 
 function parsePolicy(manifest: Manifest): Policy {
@@ -616,12 +642,17 @@ function assetsFor(workload: Workload, model: Model, opts?: { clearNode?: boolea
       assets.push({
         id: "rbac-exec",
         title: "Pod exec",
-        caption: "pods/exec",
-        detail: `Service account ${wl.serviceAccount} can exec into pods.`,
+        caption: access.execToken || "pods/exec",
+        detail:
+          access.execToken === "pods/attach"
+            ? `Service account ${wl.serviceAccount} can attach to other pods.`
+            : access.execToken === "pods/ephemeralcontainers"
+              ? `Service account ${wl.serviceAccount} can inject an ephemeral container into other pods.`
+              : `Service account ${wl.serviceAccount} can exec into pods.`,
         impact: 88,
         category: "rbac",
         edge: "RBAC",
-        token: "pods/exec",
+        token: access.execToken || "pods/exec",
         file: access.bindingFile,
         sourceKind: access.bindingKind,
         sourceName: access.bindingName,
@@ -688,6 +719,42 @@ function assetsFor(workload: Workload, model: Model, opts?: { clearNode?: boolea
         file: access.proxyFile || access.bindingFile,
         sourceKind: access.bindingKind,
         sourceName: access.bindingName,
+        fixOp: "drop-rbac",
+      });
+    }
+  }
+
+  const extra = model.escalation.byWorkload.get(wl.id);
+  const path = extra?.path;
+  const hideNode = Boolean(opts?.clearNode || opts?.clearHostPath || opts?.clearPrivilege || opts?.clearHostNs);
+  const hideRbac = Boolean(opts?.dropRbac);
+  if (path && !path.direct && !(path.gate === "node" ? hideNode : hideRbac)) {
+    assets.unshift({
+      id: "rbac-chain",
+      title: "Escalation path",
+      caption: path.steps.map((step) => step.label).join(" → ") || "cluster admin",
+      detail: `${path.detail} Change that breaks it: ${path.fix}`,
+      impact: path.impact,
+      category: "rbac",
+      edge: "escalation",
+      token: path.token,
+      file: path.file,
+      fixOp: path.gate === "node" ? "clear-node" : "drop-rbac",
+      steps: path.steps,
+    });
+  }
+  if (!hideRbac) {
+    for (const exposure of extra?.exposures || []) {
+      assets.push({
+        id: exposure.id,
+        title: exposure.title,
+        caption: exposure.token,
+        detail: exposure.detail,
+        impact: exposure.impact,
+        category: "rbac",
+        edge: "RBAC",
+        token: exposure.token,
+        file: exposure.file,
         fixOp: "drop-rbac",
       });
     }
@@ -818,7 +885,7 @@ function factorsOf(assets: Asset[]): ScoreFactor[] {
 }
 
 function iconFor(asset: Asset): NodeIcon {
-  if (asset.id === "rbac-admin") return "admin";
+  if (asset.id === "rbac-admin" || asset.id === "rbac-chain") return "admin";
   if (asset.id === "node") return "node";
   if (asset.id.startsWith("secret:")) return "secret";
   if (asset.id === "cloud") return "cloud";
@@ -828,7 +895,7 @@ function iconFor(asset: Asset): NodeIcon {
 
 function summary(workload: Workload, assets: Asset[]): string {
   if (assets.length === 0) return "No meaningful reach beyond this workload.";
-  const labels = assets.slice(0, 3).map((asset) => asset.title);
+  const labels = assets.slice(0, 3).map((asset) => (asset.id === "rbac-chain" ? "cluster admin" : asset.title));
   if (assets.length > 3) labels.push(`${assets.length - 3} more`);
   if (labels.length === 1) return `Compromise reaches ${labels[0]}.`;
   const last = labels.pop();
@@ -880,7 +947,9 @@ function candidateOps(workload: Workload, model: Model): FixOp[] {
   if (workload.privileged || workload.capabilities.length || workload.allowPrivilegeEscalation) ops.push("clear-privilege");
   if (workload.hostNetwork || workload.hostPID || workload.hostIPC || workload.hostPort) ops.push("clear-hostns");
   const access = model.access.get(`${workload.namespace}/${workload.serviceAccount}`);
-  if (access && (access.clusterAdmin || access.clusterSecrets || access.namespaceSecrets || access.podCreate || access.podExec || access.nodesProxy)) ops.push("drop-rbac");
+  const extra = model.escalation.byWorkload.get(workload.id);
+  const chained = Boolean(extra?.path && !extra.path.direct && extra.path.gate === "rbac") || Boolean(extra?.exposures.length);
+  if ((access && (access.clusterAdmin || access.clusterSecrets || access.namespaceSecrets || access.podCreate || access.podExec || access.nodesProxy)) || chained) ops.push("drop-rbac");
   const egress = egressFor(workload, model, false);
   if (egress.mode !== "deny" && egress.services.length > 0) ops.push("isolate-egress");
   if (workload.mountedSecrets.length) ops.push("unmount-secrets");
@@ -913,11 +982,13 @@ function toView(workload: Workload, model: Model): WorkloadView {
     if (shrink < 5) continue;
     const removed = assets.filter((asset) => !afterAssets.some((next) => next.id === asset.id && next.impact >= asset.impact - 1)).map((asset) => asset.id);
     const copy = FIX_COPY[op];
+    const extra = model.escalation.byWorkload.get(workload.id);
+    const pathFix = op === "drop-rbac" && extra?.path && !extra.path.direct && extra.path.gate === "rbac" ? extra.path.fix : "";
     fixes.push({
       id: `${workload.id}:${op}`,
       op,
-      title: copy.title,
-      detail: copy.detail,
+      title: pathFix ? "Break the path to cluster admin" : copy.title,
+      detail: pathFix || copy.detail,
       scoreBefore: before,
       scoreAfter: after,
       shrink,
@@ -952,23 +1023,41 @@ function toView(workload: Workload, model: Model): WorkloadView {
       role: "workload",
       icon: "workload",
     },
-    ...shown.map((asset) => ({
-      id: `${workload.id}:${asset.id}`,
+  ];
+  const edges: GraphEdge[] = [];
+  for (const asset of shown) {
+    const findingId = `${workload.id}:${asset.id}`;
+    if (asset.steps && asset.steps.length) {
+      let previous = workload.id;
+      asset.steps.forEach((step, index) => {
+        const id = `${findingId}:${index}`;
+        nodes.push({
+          id,
+          label: step.label,
+          caption: step.caption,
+          impact: asset.impact,
+          severity: severity(asset.impact),
+          role: "asset",
+          icon: step.icon,
+          findingId,
+        });
+        edges.push({ source: previous, target: id, label: step.edge, findingId });
+        previous = id;
+      });
+      continue;
+    }
+    nodes.push({
+      id: findingId,
       label: asset.title,
       caption: asset.caption,
       impact: asset.impact,
       severity: severity(asset.impact),
-      role: "asset" as const,
+      role: "asset",
       icon: iconFor(asset),
-      findingId: `${workload.id}:${asset.id}`,
-    })),
-  ];
-  const edges: GraphEdge[] = shown.map((asset) => ({
-    source: workload.id,
-    target: `${workload.id}:${asset.id}`,
-    label: asset.edge,
-    findingId: `${workload.id}:${asset.id}`,
-  }));
+      findingId,
+    });
+    edges.push({ source: workload.id, target: findingId, label: asset.edge, findingId });
+  }
 
   return {
     id: workload.id,
@@ -993,6 +1082,9 @@ export interface Analysis {
   workloads: WorkloadView[];
   score: number;
   committedSecrets: { namespace: string; name: string; keys: number; file?: string }[];
+  cuts: PathCut[];
+  standing: StandingNote[];
+  caveat?: string;
 }
 
 export function analyze(manifests: Manifest[]): Analysis {
@@ -1001,5 +1093,12 @@ export function analyze(manifests: Manifest[]): Analysis {
   const committedSecrets = [...model.secrets.values()]
     .filter((secret) => secret.committed)
     .map((secret) => ({ namespace: secret.namespace, name: secret.name, keys: secret.keys, file: secret.file }));
-  return { workloads, score: repoScore(workloads.map((workload) => workload.score)), committedSecrets };
+  return {
+    workloads,
+    score: repoScore(workloads.map((workload) => workload.score)),
+    committedSecrets,
+    cuts: model.escalation.cuts,
+    standing: model.escalation.standing,
+    caveat: model.escalation.caveat,
+  };
 }

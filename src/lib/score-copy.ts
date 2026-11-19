@@ -23,7 +23,16 @@ export function scoreMeaning(score: number): string {
 export function factorSentence(factor: ScoreFactor): string {
   const extra = `(+${factor.points})`;
   if (factor.id === "rbac-admin") return `Can act as cluster admin through Kubernetes permissions ${extra}`;
+  if (factor.id === "rbac-chain") return `Can reach cluster admin through a chain of other permissions ${extra}`;
   if (factor.id === "rbac-exec") return `Can open a shell inside other pods ${extra}`;
+  if (factor.id === "rbac-impersonate") return `Can impersonate another user, group, or service account ${extra}`;
+  if (factor.id === "rbac-bind") return `Can bind a role they do not already hold ${extra}`;
+  if (factor.id === "rbac-escalate") return `Can escalate a role beyond the permissions they hold ${extra}`;
+  if (factor.id === "rbac-token") return `Can request a token for another service account ${extra}`;
+  if (factor.id === "rbac-mint") return `Can create a secret that issues a service account token ${extra}`;
+  if (factor.id === "rbac-csr") return `Can approve client certificates for other users ${extra}`;
+  if (factor.id === "rbac-policy") return `Can rewrite validating webhooks that guard the cluster ${extra}`;
+  if (factor.id === "rbac-api") return `Can redirect an aggregated API to another server ${extra}`;
   if (factor.id === "rbac-secrets") return `Can read secrets in every namespace ${extra}`;
   if (factor.id === "rbac-secrets-ns") return `Can read secrets in its own namespace ${extra}`;
   if (factor.id === "rbac-pods") return `Can create pods, a step toward reaching other secrets ${extra}`;
