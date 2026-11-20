@@ -54,6 +54,12 @@ export function factorSentence(factor: ScoreFactor): string {
   return `${factor.label} ${extra}`;
 }
 
+/** Shown on the score tooltip only when this workload has a chained route to cluster admin. */
+export function routeExplanation(factors: ScoreFactor[]): string | null {
+  if (!factors.some((factor) => factor.id === "rbac-chain")) return null;
+  return "Fathom starts from this workload and follows every permission it has, step by step (create a pod, read a secret, bind a role), using only what the repo's manifests grant. It shows the route to cluster admin with the fewest and most reliable steps.";
+}
+
 export function combineSentence(factors: ScoreFactor[]): string {
   if (factors.length === 0) return "Nothing beyond this workload is reachable, so the score is 0.";
   if (factors.length === 1) return "There is one reason, so the score is that reason's points.";

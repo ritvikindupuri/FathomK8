@@ -1,7 +1,7 @@
 "use client";
 
 import type { ScoreFactor } from "@/engine/types";
-import { BAND_LEGEND, bandName, combineSentence, factorSentence, scoreMeaning } from "@/lib/score-copy";
+import { BAND_LEGEND, bandName, combineSentence, factorSentence, routeExplanation, scoreMeaning } from "@/lib/score-copy";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { ReactNode } from "react";
 
@@ -27,6 +27,7 @@ export function ScoreTip({
   note?: string;
   children: ReactNode;
 }) {
+  const route = routeExplanation(factors);
   return (
     <Tooltip
       wide
@@ -40,6 +41,7 @@ export function ScoreTip({
             <p className="font-medium text-foreground">Why this score</p>
             <ReasonList factors={factors} />
           </div>
+          {route ? <p>{route}</p> : null}
           <p>{combineSentence(factors)}</p>
           {note ? <p>{note}</p> : null}
         </div>

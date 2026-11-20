@@ -36,6 +36,13 @@ Fathom scores how much of a cluster an attacker could reach from one workload. I
 
 Source: [`docs/images/architecture.svg`](docs/images/architecture.svg).
 
+## How the attack route is found
+
+- It starts at the workload.
+- Each step is a real grant from a specific file in the repository.
+- It prefers certain steps over guesses. The route scores 100 when every step is certain, 90 if a step is only likely, and 74 if a step is a guess.
+- The suggested fix is the grant whose removal breaks the most routes.
+
 ## Tech stack
 
 | Area | Components |
