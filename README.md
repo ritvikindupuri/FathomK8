@@ -146,6 +146,8 @@ cp .env.example .env.local  # Next.js reads .env.local
 
 Restart after changing these. Repositories you have scanned are fetched again on startup. Until then the page is empty.
 
+**Security note:** The API endpoints have no authentication. Anyone who can reach the server can scan repositories, view all results, and create share links. Run Fathom on a trusted network or put authentication in front of it before exposing it publicly.
+
 ```bash
 curl -s -X POST http://127.0.0.1:3847/api/scan \
   -H 'content-type: application/json' \
@@ -163,4 +165,4 @@ Webhook: payload URL `https://<your-host>/api/webhooks/github`, content type `ap
 3. Use the repository menu to switch repositories, or **All repositories** to go home.
 4. **Overview** is the repository list, or the timeline inside a repository. Under the name: branch, linked commit, and scan date. **Files scanned** stays collapsed. A badge appears only when the score changed. **Workloads**, **Attack graph**, and **Fixes** open the selected repository. On the home page they open the highest-risk repository once one exists. The attack graph draws a chain when one reaches cluster admin.
 5. Hover a blast radius. The tooltip says what 0–100 means, the band, and the reasons with the points each one adds. Those reasons do not add together. The score stays at or below 100.
-6. **Share** copies a read-only link. Someone with the link sees the same results as they update. They cannot scan or create another link.
+6. **Share** copies a read-only link. Someone with the link can view all repositories and results as they update. They cannot scan new repositories or create another share link. Share links are not scoped to a single repository—they provide read-only access to the entire system.
